@@ -1,0 +1,85 @@
+:root { font-family: 'Noto Sans SC', system-ui, sans-serif; color: #f7f4e8; background: #151f39; }
+* { box-sizing: border-box; }
+html, body { min-height: 100%; margin: 0; }
+body { background: radial-gradient(circle at 15% 10%, #2f4268 0, transparent 28%), radial-gradient(circle at 90% 90%, #243555 0, transparent 33%), #151f39; }
+button { font: inherit; cursor: pointer; }
+.app { width: min(1080px, calc(100% - 32px)); margin: 0 auto; padding: 22px 0 18px; }
+.topbar, .brand, .top-actions, .footer, .hud, .touch-controls, .touch-group { display: flex; align-items: center; }
+.topbar { justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.brand { gap: 12px; }
+.brand-icon { display: grid; place-items: center; width: 44px; height: 44px; border: 2px solid #ffdb7c; border-radius: 13px; background: #f8aa65; color: #713e29; font-size: 25px; box-shadow: 3px 4px 0 #0b1328; }
+.eyebrow, .hud-label, .menu-kicker { font-family: 'DM Mono', monospace; font-weight: 500; letter-spacing: .15em; }
+.eyebrow { color: #fbc779; font-size: 10px; }
+h1 { margin: 0; font-size: clamp(17px, 2.6vw, 24px); letter-spacing: -.03em; line-height: 1.3; }
+h1 span { color: #fbc779; }
+.top-actions { gap: 8px; }
+.icon-button { display: grid; place-items: center; width: 43px; height: 43px; border: 2px solid #7080a5; border-radius: 12px; background: #253354; color: #fff8e7; font-size: 20px; box-shadow: 0 4px 0 #0e172b; transition: transform .15s, box-shadow .15s, background .15s; }
+.icon-button:hover { background: #32466f; transform: translateY(-2px); box-shadow: 0 6px 0 #0e172b; }
+.icon-button:active { transform: translateY(3px); box-shadow: 0 1px 0 #0e172b; }
+.game-shell { position: relative; overflow: hidden; border: 4px solid #ffdf94; border-radius: 19px; background: #b6e9f8; box-shadow: 0 12px 0 #0d152a, 0 26px 55px #05091366; }
+canvas { display: block; width: 100%; aspect-ratio: 16 / 9; image-rendering: pixelated; touch-action: none; }
+.hud { position: absolute; z-index: 2; left: 0; right: 0; top: 0; justify-content: space-around; gap: 8px; min-height: 70px; padding: 10px 15px; background: linear-gradient(180deg, #1d3e6ac9, #1d3e6a70 77%, transparent); text-shadow: 1px 2px #243a58; pointer-events: none; }
+.hud-item { display: flex; flex-direction: column; align-items: center; min-width: 70px; gap: 1px; }
+.hud-label { color: #dfedff; font-size: clamp(8px, 1vw, 11px); }
+.hud strong { font-family: 'DM Mono', monospace; font-size: clamp(14px, 2vw, 21px); white-space: nowrap; }
+.coin-mark { color: #ffd45c; font-size: 18px; text-shadow: 1px 1px #9f5b2c; }
+.overlay { position: absolute; z-index: 4; inset: 0; display: grid; place-items: center; padding: 18px; background: #122442a6; backdrop-filter: blur(4px); transition: opacity .22s; }
+.overlay.hidden { opacity: 0; pointer-events: none; }
+.menu-card { width: min(440px, 100%); padding: 25px 26px 21px; border: 3px solid #fff0c0; border-radius: 22px; background: #fff8e8; color: #26334e; text-align: center; box-shadow: 0 9px 0 #d19a5f, 0 21px 50px #10203988; }
+.menu-kicker { color: #d17f49; font-size: 12px; }
+.dog-portrait { width: 84px; height: 88px; margin: 8px auto -4px; background-image: url('assets/plush-dog.webp'); background-size: 672px 819px; background-position: 0 0; image-rendering: pixelated; }
+.menu-card h2 { margin: 5px 0 5px; font-size: clamp(21px, 3vw, 30px); letter-spacing: -.04em; }
+.menu-card p { min-height: 46px; margin: 0 auto 18px; max-width: 340px; color: #657087; font-size: 14px; line-height: 1.6; }
+.primary-button { display: inline-flex; align-items: center; justify-content: space-between; gap: 34px; min-width: 188px; padding: 11px 17px; border: 2px solid #904d37; border-radius: 12px; background: #f7955e; color: #402b2b; font-weight: 800; box-shadow: 0 5px 0 #a8553b; transition: transform .15s, box-shadow .15s; }
+.primary-button:hover { transform: translateY(-2px); box-shadow: 0 7px 0 #a8553b; }
+.primary-button:active { transform: translateY(4px); box-shadow: 0 1px 0 #a8553b; }
+.primary-button span { font-size: 20px; }
+.menu-tip { margin-top: 17px; color: #8991a0; font-size: 11px; }
+.level-picker { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 14px; }
+.level-picker.hidden { display: none; }
+.level-picker > span { margin-right: 3px; color: #788398; font-size: 11px; }
+.level-chip { min-width: 47px; padding: 5px 7px; border: 1px solid #d9cdb5; border-radius: 8px; background: #f4ead7; color: #726954; font: 700 11px 'DM Mono', monospace; }
+.level-chip:hover, .level-chip.selected { border-color: #bb704b; background: #f8ba79; color: #56352e; }
+.toast { position: absolute; z-index: 3; top: 85px; left: 50%; transform: translate(-50%, -10px); min-width: 120px; padding: 7px 14px; border: 2px solid #fce8a5; border-radius: 100px; background: #283c58e8; color: #fff6d6; font-size: 13px; font-weight: 700; text-align: center; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.effect-bar { position: absolute; z-index: 3; top: 73px; right: 16px; display: flex; gap: 6px; pointer-events: none; }
+.effect-chip { padding: 5px 8px; border: 1px solid #fff1b8; border-radius: 7px; background: #283c58d9; color: #fff9d5; box-shadow: 0 3px 0 #13274087; font-size: 11px; font-weight: 800; }
+.effect-chip.star { background: #b8732fe5; }
+.effect-chip.boots { background: #5266a5e5; }
+.effect-chip.magnet { background: #935f9ee5; }
+.effect-chip.spark { background: #ac7043e5; }
+.effect-chip.claw { background: #477b91e5; }
+.context-hint { position: absolute; z-index: 3; left: 50%; bottom: 84px; transform: translateX(-50%); padding: 7px 13px; border: 2px solid #fff2b0; border-radius: 100px; background: #172c49df; color: #fff5cf; font-size: 12px; font-weight: 800; text-align: center; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .16s; }
+.context-hint.show { opacity: 1; }
+.touch-controls { justify-content: space-between; gap: 16px; margin-top: 20px; user-select: none; -webkit-user-select: none; }
+.touch-group { gap: 9px; }
+.touch-button { width: 68px; height: 60px; border: 2px solid #7185ac; border-radius: 16px; background: #293c60; color: #f8f1dc; font-size: 25px; font-weight: 800; box-shadow: 0 5px 0 #0b142a; touch-action: none; }
+.touch-button.pressed { transform: translateY(4px); box-shadow: 0 1px 0 #0b142a; background: #46618c; }
+.jump-button { width: 78px; background: #f5a363; border-color: #ffd6a5; color: #5d352d; }
+.attack-button { background: #4b7891; border-color: #a5d7d4; color: #e9fbeb; font-size: 18px; }
+.attack-button.pressed { background: #79b3bb; }
+.jump-button.pressed { background: #ffd08a; }
+.run-button { font-size: 18px; }
+.field-guide { margin-top: 27px; padding: 17px; border: 1px solid #506386; border-radius: 17px; background: #202f4dcc; box-shadow: inset 0 1px #6980a040; }
+.field-guide-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
+.field-guide-heading strong { color: #fff1cb; font-size: 14px; }
+.field-guide-heading span { color: #9eafc9; font-size: 11px; }
+.guide-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.guide-card { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 10px 8px; border: 1px solid #485b7a; border-radius: 10px; background: #263858; }
+.guide-card div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.guide-card strong { font-size: 11px; white-space: nowrap; }
+.guide-card small { overflow: hidden; color: #b1bed5; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.guide-icon { display: grid; flex: 0 0 29px; place-items: center; width: 29px; height: 29px; border-radius: 8px; background: #526b93; color: #fff4c5; font-size: 18px; }
+.guide-icon.bone { background: #9e6652; font-size: 16px; }
+.guide-icon.boots { background: #6579b5; }
+.guide-icon.star { background: #b98046; }
+.guide-icon.magnet { background: #9d659f; }
+.guide-icon.heart { background: #b25f74; }
+.guide-icon.spark { background: #bb8250; }
+.guide-icon.claw { background: #527f9a; }
+.footer { justify-content: space-between; gap: 20px; margin-top: 13px; color: #9eacc9; font-size: 12px; }
+@media (pointer: fine) and (min-width: 760px) { .touch-controls { display: none; } .footer { margin-top: 26px; } }
+@media (max-width: 680px) { .app { width: min(100% - 12px, 1080px); padding-top: 9px; } .topbar { margin: 0 4px 10px; } .brand-icon { width: 38px; height: 38px; } .icon-button { width: 36px; height: 36px; font-size: 17px; } .game-shell { border-width: 3px; border-radius: 12px; } .hud { min-height: 48px; padding: 6px 4px; } .hud-item { min-width: 0; } .hud strong { font-size: 11px; } .coin-mark { font-size: 12px; } .hud-label { font-size: 7px; } .effect-bar { top: 49px; right: 5px; gap: 3px; } .effect-chip { padding: 3px 4px; font-size: 8px; } .context-hint { bottom: 32px; font-size: 9px; padding: 4px 7px; } .overlay { padding: 4px; } .menu-card { width: min(300px, 98%); padding: 5px 9px 8px; border-width: 2px; border-radius: 12px; box-shadow: 0 4px 0 #d19a5f, 0 12px 28px #10203988; } .menu-kicker { font-size: 8px; } .dog-portrait { width: 44px; height: 46px; margin: 2px auto -2px; background-size: 352px 429px; } .menu-card h2 { margin: 0; font-size: 15px; } .menu-card p { min-height: 0; max-width: 270px; margin: 2px auto 6px; font-size: 9px; line-height: 1.3; } .primary-button { min-width: 140px; padding: 3px 10px; font-size: 12px; box-shadow: 0 3px 0 #a8553b; } .primary-button span { font-size: 15px; } .menu-tip { display: none; } .footer { display: none; } .touch-controls { margin: 13px 6px; } .touch-button { width: 58px; height: 54px; } .jump-button { width: 70px; } }
+@media (max-width: 420px) { .brand { gap: 7px; } .eyebrow { font-size: 8px; } h1 { font-size: 15px; } .hud-level { display: none; } .touch-button { width: 48px; height: 51px; } .jump-button { width: 65px; } }
+@media (max-width: 760px) { .field-guide { margin-top: 16px; padding: 12px; } .guide-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .guide-card strong { font-size: 11px; } .guide-card small { font-size: 9px; } }
+@media (max-width: 680px) { .level-picker { gap: 3px; margin-top: 5px; } .level-picker > span { display: none; } .level-chip { min-width: 36px; padding: 2px 4px; font-size: 9px; } .attack-button { font-size: 13px; } }
