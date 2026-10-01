@@ -1,42 +1,6 @@
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-
-function element() {
-  return {
-    textContent: '', innerHTML: '', dataset: {},
-    classList: { add() {}, remove() {} },
-    addEventListener() {}, setAttribute() {},
-  };
-}
-const elements = new Map();
-const gradient = { addColorStop() {} };
-const drawing = {
-  fillRect() {}, save() {}, restore() {}, translate() {}, scale() {},
-  beginPath() {}, ellipse() {}, fill() {}, moveTo() {}, lineTo() {}, closePath() {}, fillText() {}, drawImage() {},
-  createLinearGradient() { return gradient; }, createRadialGradient() { return gradient; },
-};
-const context = vm.createContext({
-  document: {
-    querySelector(selector) {
-      if (!elements.has(selector)) elements.set(selector, element());
-      const found = elements.get(selector);
-      if (selector === '#game') found.getContext = () => drawing;
-      return found;
-    },
-    querySelectorAll() { return []; },
-    addEventListener() {},
-  },
-  window: { addEventListener() {} },
-  Image: class { set src(value) { this._src = value; } },
-  requestAnimationFrame() {},
-  setTimeout() {}, clearTimeout() {},
-  console,
-});
-const script = fs.readFileSync(path.join(__dirname, '..', 'game.js'), 'utf8');
-vm.runInContext(script, context);
-const run = source => vm.runInContext(source, context);
+const { createGame } = require('./harness.cjs');
+const { context, run } = createGame();
 
 run('startGame()');
 run("setControl('right', true)");
@@ -65,8 +29,8 @@ assert.equal(run('lives'), 3, 'shield damage should not cost a life');
 run('startGame()');
 run("collectPickup({ type: 'boots', x: 100, y: 100, taken: false }); player.grounded = false; player.coyote = 0; player.y = 310; setControl('jump', true)");
 run('step()');
-assert(run('player.vy') < -10, 'boots should enable a second jump in the air');
-assert.equal(run('player.airJumps'), 0);
+assert(run('player.vy') < -10, 'boots should enable an extra jump in the air');
+assert.equal(run('player.airJumps'), 1, 'boots should allow one more jump after the baseline air jump');
 
 run('startGame()');
 run("collectPickup({ type: 'star', x: 100, y: 100, taken: false }); player.x = enemySeeds[0].x; player.y = GROUND - player.h");
@@ -79,6 +43,7 @@ run("const targetBeetle = enemies.find(enemy => enemy.type === 'beetle'); target
 run('step()');
 assert.equal(run('targetBeetle.armor'), 0, 'the first stomp should crack beetle armor');
 assert.equal(run('targetBeetle.alive'), true);
+for (let i = 0; i < 3; i++) run('step()');
 run('player.x = targetBeetle.x; player.y = targetBeetle.y - player.h - 1; player.vy = 3; player.grounded = false');
 run('step()');
 assert.equal(run('targetBeetle.alive'), false, 'the second stomp should defeat a beetle');
@@ -152,9 +117,9 @@ run("startGame(true, 'orchard'); collectPickup({ type: 'claw', x: 100, y: 100, t
 assert.equal(run('player.weapon'), 'claw', 'the claw should equip the player');
 assert.equal(run('enemies[0].alive'), false, 'the claw attack should defeat an enemy in front');
 
-run('startGame(); winGame(); advanceStage()');
+run("startGame(true, 'surface'); winGame(); advanceStage()");
 assert.equal(run('zone.id'), 'orchard', 'clearing 1-1 should advance to 1-2');
-run('winGame(); advanceStage()');
+run('currentBoss().alive = false; winGame(); advanceStage()');
 assert.equal(run('zone.id'), 'sky', 'clearing 1-2 should advance to 1-3');
 run('winGame(); advanceStage()');
 assert.equal(run('zone.id'), 'castle', 'clearing 1-3 should advance to 1-4');
@@ -163,14 +128,15 @@ assert.equal(run('lives'), 3, 'stage progression should preserve lives');
 run("startGame(true, 'castle'); winGame()");
 assert.equal(run('state'), 'playing', 'the living guardian should lock the 1-4 exit');
 run("player.x = castle.finishX - 34; player.vx = 5; setControl('right', true); step()");
-assert(run('player.x + player.w <= castle.finishX - 6'), 'the boss gate should physically block passage');
-run("var guardian = enemies.find(enemy => enemy.type === 'guardian'); damageEnemy(guardian); damageEnemy(guardian); damageEnemy(guardian)");
-assert.equal(run('guardian.alive'), false, 'three hits should defeat the guardian');
+assert(run('player.x <= activeBossArena().maxX'), 'the arena should block passage through its right boundary');
+assert.equal(run('state'), 'playing', 'the living boss should prevent a premature clear');
+run("var guardian = enemies.find(enemy => enemy.type === 'guardian'); for (let hit = 0; hit < guardian.maxHealth; hit++) { guardian.bossState = 'recover'; guardian.hurtCooldown = 0; damageEnemy(guardian); }");
+assert.equal(run('guardian.alive'), false, 'attacks during recovery should defeat the guardian');
 run('winGame()');
 assert.equal(run('state'), 'won', 'defeating the guardian should unlock the final clear');
 
 for (const stage of ['orchard', 'sky']) {
-  run(`startGame(true, '${stage}'); player.x = zone.finishX - 5; player.y = GROUND - player.h; step()`);
+  run(`startGame(true, '${stage}'); if (currentBoss()) currentBoss().alive = false; player.x = zone.finishX - 5; player.y = GROUND - player.h; step()`);
   assert.equal(run('state'), 'won', `${stage} should clear when the player reaches its flag`);
 }
 
@@ -178,7 +144,7 @@ context.setTimeout = callback => { callback(); return 1; };
 run("startGame(); checkpoint = { zone: 'surface', x: 68 * T, y: GROUND - 34 }; timeLeft = 1 / 120; step()");
 assert.equal(run('state'), 'playing', 'time expiry should respawn when lives remain');
 assert.equal(run('lives'), 2);
-assert.equal(run('timeLeft'), 400, 'the respawn timer should be restored');
+assert.equal(run('timeLeft'), 200, 'an exhausted timer should be restored for the checkpoint retry');
 assert.equal(run('player.x'), 68 * 42, 'respawn should use the latest checkpoint');
 
 console.log('smoke tests passed: movement, blocks, enemies, items, secret pipe, four stages, attacks, guardian, finish');

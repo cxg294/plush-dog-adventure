@@ -29,7 +29,7 @@ const groundPieces = [
   { x: 62 * T, w: 30 * T },
   { x: 95 * T, w: WORLD - 95 * T },
 ];
-const control = { left: false, right: false, down: false, jump: false, run: false, attack: false };
+const control = { left: false, right: false, down: false, jump: false, run: false, attack: false, dash: false, bark: false };
 const blocks = [];
 const pipes = [];
 const stairs = [];
@@ -40,7 +40,7 @@ const particles = [];
 const movingCoins = [];
 const projectiles = [];
 const decorations = [];
-const surface = { id: 'surface', name: '地表 1 — 1', width: WORLD, groundPieces, blocks, pipes, stairs, coinSeeds, enemySeeds, pickupSeeds, decorations };
+const surface = { id: 'surface', name: '晴空草原 1 — 1', width: WORLD, groundPieces, blocks, pipes, stairs, coinSeeds, enemySeeds, pickupSeeds, decorations };
 const cave = {
   id: 'cave', name: '星光岩洞', width: CAVE_WIDTH,
   groundPieces: [{ x: 0, w: 20 * T }, { x: 23 * T, w: CAVE_WIDTH - 23 * T }],
@@ -76,6 +76,15 @@ let muted = false;
 let toastTimeout = 0;
 let lastFrame = 0;
 let accumulator = 0;
+let dashBuffer = 0, barkBuffer = 0;
+let hitStop = 0, screenShake = 0, damageFlash = 0, stageIntro = 0;
+let deathTimeout = 0;
+let runDeaths = 0, stageDeaths = 0, stageHits = 0;
+let musicEnabled = saveData.settings.musicEnabled !== false;
+const floatingLabels = [], barkWaves = [], ghostTrails = [];
+const heldInputs = new Map();
+muted = !!saveData.settings.muted;
+
 
 function addBlock(tx, row, type = 'brick', contents = null) {
   blocks.push({ x: tx * T, y: GROUND - row * T, w: T, h: T, type, contents, used: false, bump: 0, broken: false });
@@ -203,7 +212,7 @@ function stageDecorations(level, tiles) {
   tiles.forEach((tile, i) => level.decorations.push({ x: tile * T, kind: i % 3, size: i % 2 }));
 }
 
-const orchard = createStage('orchard', '1-2', '落日果园 1 — 2', 96, [[0, 30], [33, 63], [66, 96]], 90, 'orchard', [46, 72]);
+const orchard = createStage('orchard', '1-2', '落日果园 1 — 2', 96, [[0, 30], [33, 63], [66, 96]], 94.5, 'orchard', [46, 72]);
 stageLine(orchard, 8, 12, 4, 10, 'spark');
 stageLine(orchard, 18, 22, 5, 20, 'coin');
 stageLine(orchard, 35, 40, 4, 37, 'claw');
@@ -233,7 +242,7 @@ stagePickup(sky, 'boots', 5, 75); stagePickup(sky, 'claw', 54, 85);
 stageEnemies(sky, [[14, 'bat'], [18, 'slime'], [28, 'bat'], [35, 'beetle'], [41, 'bat'], [52, 'slime'], [62, 'bat'], [72, 'beetle'], [81, 'bat'], [88, 'slime']]);
 stageDecorations(sky, [5, 16, 29, 39, 51, 60, 74, 86, 94]);
 
-const castle = createStage('castle', '1-4', '月夜城堡 1 — 4', 94, [[0, 26], [29, 57], [60, 94]], 88, 'castle', [37, 67]);
+const castle = createStage('castle', '1-4', '月夜城堡 1 — 4', 94, [[0, 26], [29, 57], [60, 94]], 92.5, 'castle', [37, 67]);
 castle.bossRequired = true;
 stageLine(castle, 8, 12, 4, 10, 'spark');
 stageLine(castle, 18, 23, 5, 21, 'bone');
@@ -249,17 +258,20 @@ stageEnemies(castle, [[15, 'beetle'], [22, 'bat'], [31, 'slime'], [38, 'beetle']
 stageDecorations(castle, [6, 17, 28, 36, 48, 59, 68, 77, 90]);
 
 const stageOrder = [surface, orchard, sky, castle];
+prepareWorldFeatures();
 
 function freshPlayer() {
   return {
     x: 80, y: GROUND - 34, prevY: GROUND - 34, w: 30, h: 34, vx: 0, vy: 0,
-    grounded: true, coyote: 0, facing: 1, shield: false, invulnerable: 0,
-    bootsTime: 0, starTime: 0, magnetTime: 0, airJumps: 0, stompChain: 0,
-    weapon: null, weaponTime: 0, attackCooldown: 0, attackFrame: 0, attackId: 0, landing: 0,
+    grounded: true, coyote: 7, facing: 1, shield: false, invulnerable: 0,
+    hp: 3, maxHp: 3, bootsTime: 0, starTime: 0, magnetTime: 0, airJumps: 1, stompChain: 0,
+    weapon: null, weaponTime: 0, attackCooldown: 0, attackFrame: 0, attackId: 0, attackReach: 58, landing: 0,
+    dashTime: 0, dashCooldown: 0, airDashUsed: false, barkEnergy: 100, barkCooldown: 0,
+    combo: 0, comboTimer: 0, wallDir: 0, wallLock: 0, groundPound: false, slamWindup: 0, crouched: false,
   };
 }
 function makeEnemy(seed) {
-  const sizes = { mushroom: [30, 28], beetle: [34, 27], bat: [38, 24], slime: [32, 27], guardian: [58, 50] };
+  const sizes = { spitter: [34, 35], bramble: [80, 70], mushroom: [30, 28], beetle: [34, 27], bat: [38, 24], slime: [32, 27], guardian: [58, 50] };
   const [w, h] = sizes[seed.type] || sizes.mushroom;
   const y = seed.type === 'bat' ? GROUND - 150 : GROUND - h;
   return { ...seed, home: seed.x, active: false, y, baseY: y, w, h, vx: seed.direction * (seed.type === 'bat' ? 1.5 : seed.type === 'slime' ? .8 : seed.type === 'guardian' ? 1.25 : 1.05), vy: 0, alive: true, squash: 0, armor: seed.type === 'beetle' ? 1 : 0, health: seed.type === 'guardian' ? 3 : 1, stun: 0, phase: seed.x * .03 };
@@ -274,6 +286,8 @@ function activateZone(nextZone) {
   updateHud();
 }
 function resetWorld() {
+  clearTimeout(deathTimeout); clearTimeout(toastTimeout);
+  toastElement.classList.remove('show'); contextHint.classList.remove('show');
   player = freshPlayer();
   for (const level of Object.values(zones)) {
     level.enemies = level.enemySeeds.map(makeEnemy);
@@ -281,34 +295,27 @@ function resetWorld() {
     level.powerups = level.pickupSeeds.map(seed => ({ ...seed, w: 34, h: 30, age: 0, taken: false }));
     level.blocks.forEach(block => { block.used = false; block.broken = false; block.bump = 0; });
   }
-  particles.length = 0;
-  movingCoins.length = 0;
-  projectiles.length = 0;
-  camera = 0;
-  jumpBuffer = 0;
-  attackBuffer = 0;
-  downBuffer = 0;
-  portalCooldown = 0;
-  warp = null;
-  arrivalFade = 0;
-  tick = 0;
-  Object.keys(control).forEach(key => { control[key] = false; });
+  resetWorldFeatures(Object.values(zones));
+  resetBossBattles(Object.values(zones));
+  particles.length = movingCoins.length = projectiles.length = floatingLabels.length = barkWaves.length = ghostTrails.length = 0;
+  camera = 0; tick = 0; jumpBuffer = attackBuffer = downBuffer = dashBuffer = barkBuffer = 0;
+  portalCooldown = 0; warp = null; arrivalFade = 0; hitStop = screenShake = damageFlash = 0;
+  releaseAllControls();
   activateZone(surface);
 }
 function startGame(resetStats = true, stageId = selectedStage) {
   if (resetStats) {
-    score = 0; coinCount = 0; lives = 3; timeLeft = 400;
-    checkpoint = { zone: 'surface', x: 80, y: GROUND - 34 };
+    score = 0; coinCount = 0; gemCount = 0; stageGems = 0; lives = 3; timeLeft = 400;
+    runDeaths = stageDeaths = stageHits = 0;
   }
   resetWorld();
   activateZone(zones[stageId] || surface);
+  selectedStage = zone.id;
   checkpoint = { zone: zone.id, x: 80, y: GROUND - player.h };
-  state = 'playing';
+  state = 'playing'; stageIntro = 150;
   hideOverlay();
-  pauseButton.textContent = 'Ⅱ';
-  pauseButton.setAttribute('aria-label', '暂停游戏');
-  ensureAudio();
-  sound('start');
+  pauseButton.textContent = 'Ⅱ'; pauseButton.setAttribute('aria-label', '暂停游戏');
+  ensureAudio(); sound('start'); updateHud(); updateTitleRecords(); saveProgress();
 }
 function advanceStage() {
   const next = stageOrder[stageOrder.indexOf(zone) + 1];
@@ -325,13 +332,14 @@ function advanceStage() {
   particles.length = 0;
   movingCoins.length = 0;
   camera = 0;
-  timeLeft = 400;
+  timeLeft = 400; stageGems = stageDeaths = stageHits = 0; stageIntro = 150;
+  releaseAllControls(); enemyShots.length = 0;
   arrivalFade = 20;
   state = 'playing';
   hideOverlay();
   updateHud();
   showToast(`进入 ${next.stage}：${next.name.split(' ')[0]}！`);
-  sound('start');
+  sound('start'); saveProgress();
 }
 function setOverlay(kicker, title, message, button) {
   document.querySelector('#overlay-kicker').textContent = kicker;
@@ -339,19 +347,24 @@ function setOverlay(kicker, title, message, button) {
   document.querySelector('#overlay-text').textContent = message;
   primaryButton.innerHTML = `${button} <span>→</span>`;
   levelPicker.classList.add('hidden');
+  document.querySelector('#menu-button').classList.remove('hidden');
   overlay.classList.remove('hidden');
 }
 function hideOverlay() { overlay.classList.add('hidden'); }
+function releaseAllControls() {
+  heldInputs.clear();
+  Object.keys(control).forEach(key => { control[key] = false; });
+  jumpBuffer = attackBuffer = downBuffer = dashBuffer = barkBuffer = 0;
+  for (const button of document.querySelectorAll('[data-control]')) button.classList.remove('pressed');
+}
 function pauseGame() {
   if (state === 'playing') {
-    state = 'paused';
-    setOverlay('PAUSED', '休息一下吧', '团子狗会在这里等你，随时继续冒险。', '继续游戏');
-    pauseButton.textContent = '▶';
-    pauseButton.setAttribute('aria-label', '继续游戏');
+    releaseAllControls(); state = 'paused'; hitStop = 0; saveProgress();
+    setOverlay('TRAIL BREAK', '在这里喘口气', '营地已为你保存进度。准备好了，就继续这场冒险。', '继续冒险');
+    pauseButton.textContent = '▶'; pauseButton.setAttribute('aria-label', '继续游戏');
   } else if (state === 'paused') {
-    state = 'playing'; hideOverlay();
-    pauseButton.textContent = 'Ⅱ';
-    pauseButton.setAttribute('aria-label', '暂停游戏');
+    releaseAllControls(); state = 'playing'; hideOverlay();
+    pauseButton.textContent = 'Ⅱ'; pauseButton.setAttribute('aria-label', '暂停游戏');
   }
 }
 function showToast(message) {
@@ -364,15 +377,31 @@ function updateHud() {
   hud.score.textContent = String(score).padStart(6, '0');
   hud.coins.textContent = String(coinCount).padStart(2, '0');
   hud.time.textContent = String(Math.max(0, Math.ceil(timeLeft))).padStart(3, '0');
-  hud.lives.textContent = '♥ '.repeat(lives).trim() || '—';
+  hud.lives.textContent = '× ' + lives;
+  const health = document.querySelector('#health');
+  if (health && player) health.innerHTML = Array.from({ length: player.maxHp }, (_, index) => `<span class="${index < player.hp ? 'full' : 'empty'}">♥</span>`).join('');
+  if (health && player) health.setAttribute('aria-label', `体力 ${player.hp} / ${player.maxHp}`);
+  const energy = document.querySelector('#stamina-fill');
+  if (energy && player) energy.style.width = `${Math.round(player.barkEnergy)}%`;
+  const energyValue = document.querySelector('#stamina-value');
+  if (energyValue && player) energyValue.textContent = Math.round(player.barkEnergy);
+  const gems = document.querySelector('#gems'); if (gems) gems.textContent = String(stageGems).padStart(2, '0');
+  const progress = document.querySelector('#progress-fill'); if (progress) progress.style.width = `${Math.min(100, player.x / (zone.finishX || zone.width) * 100)}%`;
+  const recordLabel = document.querySelector('#record-label');
+  const record = saveData.records[zone.id];
+  if (recordLabel) recordLabel.textContent = record ? `BEST ${record.grade} · ${record.gems} ◆` : 'BEST —';
+  const objective = document.querySelector('#objective');
+  if (objective) objective.textContent = activeBossArena() ? '看准预警 · 闪避后反击' : zone === cave ? '星光岩洞 · 收集星晶，寻找出口' : '探索奖励路线 · 抵达营地旗帜';
   if (effectBar && player) {
     const chips = [];
-    if (player.shield) chips.push('<span class="effect-chip">🦴 护盾</span>');
-    if (player.bootsTime > 0) chips.push(`<span class="effect-chip boots">✦ 二段跳 ${Math.ceil(player.bootsTime / 60)}s</span>`);
+    if (player.shield) chips.push('<span class="effect-chip">♧ 骨头护盾</span>');
+    if (player.bootsTime > 0) chips.push(`<span class="effect-chip boots">✦ 三段跳 / 滑翔 ${Math.ceil(player.bootsTime / 60)}s</span>`);
     if (player.starTime > 0) chips.push(`<span class="effect-chip star">★ 无敌 ${Math.ceil(player.starTime / 60)}s</span>`);
     if (player.magnetTime > 0) chips.push(`<span class="effect-chip magnet">◉ 磁铁 ${Math.ceil(player.magnetTime / 60)}s</span>`);
-    if (player.weaponTime > 0 && player.weapon === 'spark') chips.push(`<span class="effect-chip spark">✹ 星火 ${Math.ceil(player.weaponTime / 60)}s · J 攻击</span>`);
-    if (player.weaponTime > 0 && player.weapon === 'claw') chips.push(`<span class="effect-chip claw">✺ 旋风爪 ${Math.ceil(player.weaponTime / 60)}s · J 攻击</span>`);
+    if (player.weaponTime > 0) {
+      const names = { spark: '✹ 星火铃铛', claw: '✺ 旋风爪套', boomerang: '⌁ 回旋骨头' };
+      chips.push(`<span class="effect-chip ${player.weapon}">${names[player.weapon]} ${Math.ceil(player.weaponTime / 60)}s</span>`);
+    }
     effectBar.innerHTML = chips.join('');
   }
 }
@@ -391,7 +420,7 @@ function sparkle(x, y, color, count = 6) {
     particles.push({ x, y, vx: Math.cos(a) * (1.1 + i % 3), vy: Math.sin(a) * 2.2 - 1.2, life: 28 + i % 11, color, size: 3 + i % 2 });
   }
 }
-function solids() { return [...zone.blocks.filter(b => !b.broken), ...zone.pipes, ...zone.stairs]; }
+function solids() { return [...zone.blocks.filter(b => !b.broken), ...zone.pipes, ...zone.stairs, ...worldSolids(), ...bossSolidGate()]; }
 function overlap(a, b) { return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
 function overGround(entity) {
   return zone.groundPieces.some(piece => entity.x + entity.w > piece.x + 2 && entity.x < piece.x + piece.w - 2);
@@ -424,8 +453,8 @@ function collectPickup(pickup) {
     showToast('骨头护盾：挡一次伤害，还能顶碎砖块');
   } else if (pickup.type === 'boots') {
     player.bootsTime = 60 * 28;
-    player.airJumps = 1;
-    showToast('弹跳靴：在空中再按一次跳跃！');
+    player.airJumps = 2;
+    showToast('云步靴：三段跳，按住跳跃还能滑翔！');
   } else if (pickup.type === 'star') {
     player.starTime = 60 * 12;
     showToast('闪光星星：12 秒无敌！');
@@ -433,12 +462,15 @@ function collectPickup(pickup) {
     player.magnetTime = 60 * 20;
     showToast('金币磁铁：附近的金币会飞过来！');
   } else if (pickup.type === 'heart') {
-    lives++;
-    showToast('爱心：生命 +1');
+    player.hp = player.maxHp; lives++;
+    showToast('爱心：体力全满，重试机会 +1');
   } else if (pickup.type === 'spark') {
     player.weapon = 'spark';
     player.weaponTime = 60 * 40;
     showToast('星火铃铛：按 J / Z 发射星火弹！');
+  } else if (pickup.type === 'boomerang') {
+    player.weapon = 'boomerang'; player.weaponTime = 60 * 50;
+    showToast('回旋骨头：按 J 投掷，一次扫过整排敌人！');
   } else if (pickup.type === 'claw') {
     player.weapon = 'claw';
     player.weaponTime = 60 * 40;
@@ -449,59 +481,108 @@ function collectPickup(pickup) {
   sound('power');
   updateHud();
 }
-function damageEnemy(enemy, points = 150) {
+function floatingText(x, y, text, color = '#fff0bd') { floatingLabels.push({ x, y, text, color, life: 55 }); }
+function feedback(x, y, color, amount = 5) {
+  sparkle(x, y, color, Math.min(18, amount * 2));
+  screenShake = Math.max(screenShake, amount);
+  hitStop = Math.max(hitStop, Math.min(5, Math.round(amount / 2)));
+}
+function damageEnemy(enemy, points = 150, kind = 'paw') {
   if (!enemy.alive) return;
+  if (enemy.isBoss) { damageBoss(enemy, points, kind); return; }
   const centerX = enemy.x + enemy.w / 2;
-  if (enemy.armor > 0) {
-    enemy.armor--;
-    enemy.stun = 85;
-    score += points;
-    sparkle(centerX, enemy.y + 5, '#9dd8ed', 12);
-    showToast('甲壳裂开了，再攻击一次！');
+  if (enemy.armor > 0 && kind !== 'slam') {
+    enemy.armor--; enemy.stun = 85; score += points;
+    feedback(centerX, enemy.y + 5, '#9dd8ed', 3);
+    floatingText(centerX, enemy.y, '破甲', '#b5edf1');
   } else {
-    enemy.health--;
-    score += points;
+    enemy.health--; score += points;
     if (enemy.health <= 0) {
-      enemy.alive = false;
-      enemy.squash = 22;
-      sparkle(centerX, enemy.y + enemy.h / 2, enemy.type === 'guardian' ? '#f6d58e' : '#fff3a8', enemy.type === 'guardian' ? 30 : 12);
-      if (enemy.type === 'guardian') showToast('城堡守卫被打败了！终点开放');
-    } else {
-      enemy.stun = 55;
-      enemy.vx *= -1;
-      sparkle(centerX, enemy.y + 12, '#f6d58e', 15);
-      showToast(`城堡守卫还需 ${enemy.health} 次攻击！`);
+      enemy.alive = false; enemy.squash = 22;
+      player.barkEnergy = Math.min(100, player.barkEnergy + 12);
+      feedback(centerX, enemy.y + enemy.h / 2, '#fff3a8', 4);
+      floatingText(centerX, enemy.y - 10, `+${points}`);
     }
   }
-  sound('stomp');
-  updateHud();
+  sound('stomp'); updateHud();
 }
 function useAttack() {
-  if (!player.weapon || player.weaponTime <= 0 || player.attackCooldown > 0 || state !== 'playing') return;
+  if (player.attackCooldown > 0 || state !== 'playing' || player.groundPound) return;
   player.attackId++;
-  if (player.weapon === 'spark') {
-    projectiles.push({ x: player.x + (player.facing > 0 ? player.w : -16), y: player.y + 10, w: 16, h: 12, vx: player.facing * 8.5, life: 82, phase: tick });
-    player.attackCooldown = 19;
+  const weapon = player.weaponTime > 0 ? player.weapon : null;
+  if (weapon === 'spark') {
+    projectiles.push({ x: player.x + (player.facing > 0 ? player.w : -16), y: player.y + 10, w: 16, h: 12, vx: player.facing * 8.5, life: 82, phase: tick, kind: 'spark' });
+    player.attackCooldown = 17;
+  } else if (weapon === 'boomerang') {
+    if (projectiles.some(shot => shot.kind === 'boomerang')) return;
+    projectiles.push({ x: player.x + 15, y: player.y + 10, w: 28, h: 20, vx: player.facing * 9, life: 95, age: 0, phase: tick, kind: 'boomerang', hits: new Set() });
+    player.attackCooldown = 30;
   } else {
-    player.attackFrame = 12;
-    player.attackCooldown = 28;
-    player.vx = player.facing * Math.max(5.5, Math.abs(player.vx));
-    sparkle(player.x + (player.facing > 0 ? 32 : 0), player.y + 10, '#d7f4ec', 5);
+    player.combo = player.comboTimer > 0 ? player.combo % 3 + 1 : 1;
+    player.comboTimer = 50; player.attackFrame = weapon === 'claw' ? 14 : 10;
+    player.attackReach = weapon === 'claw' ? 90 : 48 + player.combo * 10;
+    player.attackCooldown = weapon === 'claw' ? 20 : 17;
+    if (player.combo === 3) { player.vx += player.facing * 1.3; screenShake = Math.max(screenShake, 2); }
   }
   sound('attack');
 }
+function useDash() {
+  if (state !== 'playing' || player.dashCooldown > 0 || player.barkEnergy < 25 || player.groundPound || !player.grounded && player.airDashUsed) return false;
+  const direction = Number(control.right) - Number(control.left);
+  if (direction) player.facing = direction;
+  player.dashTime = 10; player.dashCooldown = 48; player.barkEnergy -= 25;
+  if (!player.grounded) player.airDashUsed = true;
+  player.vx = player.facing * 11.8; player.vy = 0;
+  feedback(player.x + 15, player.y + 17, '#b7ebdf', 2); sound('dash'); updateHud(); return true;
+}
+function useBark() {
+  if (state !== 'playing' || player.barkCooldown > 0 || player.barkEnergy < 35) return false;
+  player.barkEnergy -= 35; player.barkCooldown = 65;
+  const x = player.x + 15, y = player.y + 17;
+  barkWaves.push({ x, y, life: 26, type: 'bark' });
+  for (const enemy of enemies) {
+    if (!enemy.alive || enemy.isBoss || Math.hypot(enemy.x + enemy.w / 2 - x, enemy.y + enemy.h / 2 - y) > 170) continue;
+    enemy.stun = 120; enemy.vx = Math.sign(enemy.x - x || 1) * Math.abs(enemy.vx);
+    floatingText(enemy.x + enemy.w / 2, enemy.y, '震晕', '#b1f5e7');
+  }
+  barkWorld(x, y); bossBarkPulse(x, y);
+  sound('bark'); screenShake = Math.max(screenShake, 3); updateHud(); return true;
+}
+function damagePlayer(amount = 1, sourceX = player.x) {
+  if (state !== 'playing' || player.invulnerable > 0 || player.starTime > 0 || player.dashTime > 0) return false;
+  player.invulnerable = 80; player.vx = Math.sign(player.x + 15 - sourceX || 1) * 5;
+  player.vy = -6; player.groundPound = false;
+  player.grounded = false; player.coyote = 0;
+  if (player.shield) { player.shield = false; showToast('骨头护盾吸收了这次伤害'); }
+  else { player.hp = Math.max(0, player.hp - amount); stageHits++; }
+  damageFlash = 14; screenShake = 6; sound('hurt'); updateHud();
+  if (player.hp <= 0) loseLife();
+  return true;
+}
 function updateProjectiles() {
   for (const shot of projectiles) {
-    shot.x += shot.vx;
+    if (shot.life <= 0) continue;
     shot.life--;
-    const hit = enemies.find(enemy => enemy.alive && overlap(shot, enemy));
-    if (hit) {
-      damageEnemy(hit, 180);
-      shot.life = 0;
-      sparkle(shot.x, shot.y, '#ffeab2', 7);
-    } else if (solids().some(solid => solid.type !== 'spring' && overlap(shot, solid))) {
-      shot.life = 0;
-      sparkle(shot.x, shot.y, '#ffeab2', 5);
+  if (shot.kind === 'boomerang') {
+      shot.age++;
+      if (shot.age > 24 || shot.returning) {
+        if (!shot.returning) shot.hits.clear();
+        shot.returning = true;
+        const dx = player.x + 15 - shot.x, dy = player.y + 12 - shot.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance < 24) { shot.life = 0; player.barkEnergy = Math.min(100, player.barkEnergy + 4); continue; }
+        shot.vx = dx / distance * 10; shot.vy = dy / distance * 10;
+      }
+      shot.x += shot.vx; shot.y += shot.vy || 0;
+      for (const enemy of enemies) if (enemy.alive && overlap(shot, enemy) && !shot.hits.has(enemy)) {
+        shot.hits.add(enemy); damageEnemy(enemy, 200, 'boomerang');
+      }
+      if (!shot.returning && solids().some(solid => !solid.oneWay && overlap(shot, solid))) { shot.returning = true; shot.hits.clear(); }
+    } else {
+      shot.x += shot.vx;
+      const hit = enemies.find(enemy => enemy.alive && overlap(shot, enemy));
+      if (hit) { damageEnemy(hit, 180, 'spark'); shot.life = 0; sparkle(shot.x, shot.y, '#ffeab2', 7); }
+      else if (solids().some(solid => !solid.oneWay && solid.type !== 'spring' && overlap(shot, solid))) { shot.life = 0; sparkle(shot.x, shot.y, '#ffeab2', 5); }
     }
   }
   for (let i = projectiles.length - 1; i >= 0; i--) if (projectiles[i].life <= 0 || Math.abs(projectiles[i].x - player.x) > W + 180) projectiles.splice(i, 1);
@@ -532,14 +613,15 @@ function finishWarp() {
   player.grounded = true;
   player.coyote = 7;
   player.invulnerable = Math.max(player.invulnerable, 45);
-  player.stompChain = 0;
+  player.stompChain = 0; player.airJumps = player.bootsTime > 0 ? 2 : 1; player.airDashUsed = false;
+  projectiles.length = enemyShots.length = 0;
   checkpoint = { zone: destination.zone, x: destination.x, y: destination.y };
   camera = Math.max(0, Math.min(zone.width - W, player.x - 290));
   portalCooldown = 48;
   arrivalFade = 20;
   warp = null;
   state = 'playing';
-  showToast(zone === cave ? '发现秘密空间：星光岩洞！' : '回到地表，继续冒险！');
+  showToast(zone === cave ? '发现秘密空间：星光岩洞！' : '回到地表，继续冒险！'); saveProgress();
 }
 function updateContextHint() {
   if (state !== 'playing') { contextHint.classList.remove('show'); return; }
@@ -553,126 +635,137 @@ function updateContextHint() {
 }
 function resolvePlayerX() {
   for (const solid of solids()) {
-    if (solid.type === 'spring') continue;
-    if (!overlap(player, solid)) continue;
-    if (player.vx > 0) player.x = solid.x - player.w;
-    else if (player.vx < 0) player.x = solid.x + solid.w;
-    player.vx = 0;
+    if (solid.type === 'spring' || solid.oneWay || !overlap(player, solid)) continue;
+    const direction = Math.sign(player.vx);
+    if (direction > 0) player.x = solid.x - player.w;
+    else if (direction < 0) player.x = solid.x + solid.w;
+    if (!player.grounded && direction) player.wallDir = direction;
+    player.vx = 0; player.dashTime = 0;
   }
-  if (zone.bossRequired && enemies.some(enemy => enemy.type === 'guardian' && enemy.alive) && player.vx > 0 && player.x + player.w > zone.finishX - 6 && player.x < zone.finishX - 6) {
-    player.x = zone.finishX - player.w - 6;
-    player.vx = 0;
+}
+function movePlayerX(distance) {
+  const parts = Math.max(1, Math.ceil(Math.abs(distance) / 6));
+  for (let i = 0; i < parts; i++) {
+    player.x += distance / parts; resolvePlayerX();
+    if (player.vx === 0) break;
   }
+}
+function slamImpact() {
+  player.groundPound = false; player.slamWindup = 0;
+  barkWaves.push({ x: player.x + 15, y: player.y + player.h, life: 22, type: 'slam' });
+  feedback(player.x + 15, player.y + player.h, '#fff0be', 8);
+  sound('slam'); player.barkEnergy = Math.min(100, player.barkEnergy + 10);
+  for (const enemy of enemies) if (enemy.alive && Math.abs(enemy.x + enemy.w / 2 - (player.x + 15)) < 110 && Math.abs(enemy.y + enemy.h - (player.y + player.h)) < 90) damageEnemy(enemy, 300, 'slam');
 }
 function resolvePlayerY() {
   const impact = player.vy;
   player.grounded = false;
   for (const solid of solids()) {
     if (!overlap(player, solid)) continue;
+    if (solid.oneWay && (player.vy < 0 || player.prevY + player.h > solid.y + Math.max(8, Math.abs(solid.dy || 0) + 2))) continue;
     if (solid.type === 'spring' && player.vy >= 0) {
-      player.y = solid.y - player.h;
-      player.vy = -19;
-      player.grounded = false;
-      sparkle(player.x + 15, solid.y, '#f5b7f3', 10);
-      sound('spring');
-      continue;
+      player.y = solid.y - player.h; player.vy = -19; player.groundPound = false;
+      player.airJumps = player.bootsTime > 0 ? 2 : 1; player.airDashUsed = false;
+      sparkle(player.x + 15, solid.y, '#f5b7f3', 10); sound('spring'); continue;
     }
-    if (player.vy >= 0 && player.prevY + player.h <= solid.y + 12) {
-      player.y = solid.y - player.h;
-      player.vy = 0;
-      player.grounded = true;
-    } else if (player.vy < 0 && player.prevY >= solid.y + solid.h - 12) {
-      player.y = solid.y + solid.h;
-      player.vy = 0;
+    if (player.vy >= 0 && player.prevY + player.h <= solid.y + 16) {
+      if (player.groundPound && solid.type === 'brick') { solid.broken = true; score += 50; sparkle(solid.x + 20, solid.y + 20, '#d5aa7d', 12); continue; }
+      if (player.groundPound && solid.type === 'question') hitBlock(solid);
+      player.y = solid.y - player.h; player.vy = 0; player.grounded = true;
+    } else if (!solid.oneWay && player.vy < 0 && player.prevY >= solid.y + solid.h - 12) {
+      player.y = solid.y + solid.h; player.vy = 0;
       if (solid.type === 'question' || solid.type === 'brick') hitBlock(solid);
     }
   }
-  if (player.vy >= 0 && player.prevY + player.h <= GROUND + 12 && player.y + player.h >= GROUND && overGround(player)) {
-    player.y = GROUND - player.h;
-    player.vy = 0;
-    player.grounded = true;
+  if (player.vy >= 0 && player.prevY + player.h <= GROUND + 16 && player.y + player.h >= GROUND && overGround(player)) {
+    player.y = GROUND - player.h; player.vy = 0; player.grounded = true;
   }
   if (player.grounded) {
     if (impact > 5) player.landing = Math.min(10, Math.round(impact));
-    player.coyote = 7;
-    player.airJumps = player.bootsTime > 0 ? 1 : 0;
-    player.stompChain = 0;
+    if (player.groundPound) slamImpact();
+    player.coyote = 7; player.airJumps = player.bootsTime > 0 ? 2 : 1; player.airDashUsed = false;
+    player.stompChain = 0; player.wallDir = 0;
   }
 }
 function updatePlayer() {
-  if (player.invulnerable > 0) player.invulnerable--;
-  if (player.landing > 0) player.landing--;
-  if (player.attackCooldown > 0) player.attackCooldown--;
-  if (player.attackFrame > 0) player.attackFrame--;
+  for (const key of ['invulnerable','landing','attackCooldown','attackFrame','dashCooldown','barkCooldown','wallLock','comboTimer']) if (player[key] > 0) player[key]--;
   if (player.weaponTime > 0 && --player.weaponTime === 0) { player.weapon = null; player.attackFrame = 0; }
-  if (attackBuffer > 0) attackBuffer--;
-  if ((control.attack || attackBuffer > 0) && player.attackCooldown === 0) { useAttack(); attackBuffer = 0; }
   if (player.bootsTime > 0) player.bootsTime--;
   if (player.starTime > 0) player.starTime--;
-  if (player.starTime > 0 && tick % 5 === 0) sparkle(player.x + 15 + Math.sin(tick) * 18, player.y + 15 + Math.cos(tick * 2) * 18, '#fff2a5', 2);
   if (player.magnetTime > 0) player.magnetTime--;
   if (portalCooldown > 0) portalCooldown--;
+  player.barkEnergy = Math.min(100, player.barkEnergy + (player.grounded ? .35 : .16));
+  if (player.starTime > 0 && tick % 5 === 0) sparkle(player.x + 15, player.y + 15, '#fff2a5', 2);
+  if (attackBuffer > 0) attackBuffer--;
+  if ((control.attack || attackBuffer > 0) && player.attackCooldown === 0) { useAttack(); attackBuffer = 0; }
+  if (dashBuffer > 0) { dashBuffer--; if (useDash()) dashBuffer = 0; }
+  if (barkBuffer > 0) { barkBuffer--; if (useBark()) barkBuffer = 0; }
   if (downBuffer > 0) downBuffer--;
+  const wantsCrouch = control.down && player.grounded && !portalUnderPlayer();
+  if (wantsCrouch && !player.crouched) { player.h = 22; player.y += 12; player.crouched = true; }
+  else if (!wantsCrouch && player.crouched) {
+    const standing = { x: player.x, y: player.y - 12, w: player.w, h: 34 };
+    if (!solids().some(solid => !solid.oneWay && overlap(standing, solid))) { player.y -= 12; player.h = 34; player.crouched = false; }
+  }
   player.prevY = player.y;
   const direction = Number(control.right) - Number(control.left);
-  const maxSpeed = control.run ? 5.4 : 3.7;
-  if (direction) {
-    player.vx += direction * (player.grounded ? .66 : .43);
-    player.vx = Math.max(-maxSpeed, Math.min(maxSpeed, player.vx));
-    player.facing = direction;
-  } else {
-    player.vx *= player.grounded ? .79 : .94;
-    if (Math.abs(player.vx) < .08) player.vx = 0;
-  }
+  const maxSpeed = player.crouched ? 1.8 : control.run ? 5.8 : 4.2;
+  if (player.dashTime > 0) { player.dashTime--; player.vx = player.facing * 11.8; player.vy = 0; }
+  else if (player.wallLock > 0) { player.vx *= .98; }
+  else if (direction) {
+    player.vx += direction * (player.grounded ? .7 : .45);
+    player.vx = Math.max(-maxSpeed, Math.min(maxSpeed, player.vx)); player.facing = direction;
+  } else { player.vx *= player.grounded ? .76 : .96; if (Math.abs(player.vx) < .08) player.vx = 0; }
   if (!player.grounded && player.coyote > 0) player.coyote--;
   if (jumpBuffer > 0) jumpBuffer--;
-  if (jumpBuffer && (player.grounded || player.coyote || (player.bootsTime > 0 && player.airJumps > 0))) {
+  if (jumpBuffer && !player.groundPound && (player.grounded || player.coyote || player.wallDir || player.airJumps > 0)) {
     const airJump = !player.grounded && !player.coyote;
-    player.vy = airJump ? -13.2 : -15;
-    if (airJump) {
-      player.airJumps--;
-      sparkle(player.x + 15, player.y + 28, '#a8cfff', 10);
-      sound('doubleJump');
-    } else sound('jump');
-    player.grounded = false;
-    player.coyote = 0;
-    jumpBuffer = 0;
-    sparkle(player.x + player.w / 2, player.y + player.h, '#fff1cf', 4);
+    if (airJump && player.wallDir) {
+      player.vx = -player.wallDir * 6.8; player.facing = -player.wallDir; player.wallLock = 12;
+      player.vy = -13.8; player.airJumps = Math.max(1, player.airJumps); player.airDashUsed = false;
+      floatingText(player.x + 15, player.y, '蹬墙', '#bbefe0');
+    } else { player.vy = airJump ? -12.4 : -14; if (airJump) player.airJumps--; }
+    if (player.crouched) { player.y -= 12; player.h = 34; player.crouched = false; }
+    player.grounded = false; player.coyote = 0; player.wallDir = 0; player.dashTime = 0; jumpBuffer = 0;
+    sparkle(player.x + 15, player.y + player.h, airJump ? '#b2e5fa' : '#fff1cf', 6);
+    sound(airJump ? 'doubleJump' : 'jump');
   }
-  player.x += player.vx;
-  resolvePlayerX();
+  if (downBuffer > 0 && !player.grounded && player.coyote === 0 && !player.groundPound) {
+    player.groundPound = true; player.slamWindup = 6; player.dashTime = 0; downBuffer = 0;
+  }
+  player.wallDir = 0;
+  movePlayerX(player.groundPound ? player.vx * .22 : player.vx);
   player.x = Math.max(0, Math.min(zone.width - player.w, player.x));
-  player.vy = Math.min(12, player.vy + .55);
-  player.y += player.vy;
-  resolvePlayerY();
-
+  const arena = activeBossArena();
+  if (arena) player.x = Math.max(arena.minX, Math.min(arena.maxX, player.x));
+  if (player.groundPound) {
+    if (player.slamWindup > 0) { player.slamWindup--; player.vy = -1; } else player.vy = 18;
+  } else if (player.dashTime === 0) {
+    const gliding = player.bootsTime > 0 && control.jump && player.vy > 0;
+    player.vy = Math.min(gliding ? 3.4 : 12, player.vy + (gliding ? .14 : .55));
+    if (player.wallDir && direction === player.wallDir && player.vy > 0) player.vy = Math.min(2.1, player.vy);
+  }
+  player.y += player.vy; resolvePlayerY();
+  if (player.dashTime > 0 && tick % 2 === 0) ghostTrails.push({ x: player.x, y: player.y, facing: player.facing, life: 12 });
   for (const coin of coins) {
-    const dx = Math.abs(coin.x - (player.x + 15));
-    const dy = Math.abs(coin.y - (player.y + 17));
-    if (!coin.taken && (dx < 28 && dy < 31 || player.magnetTime > 0 && dx < 130 && dy < 115)) {
-      coin.taken = true;
-      gainCoin(coin.x, coin.y);
-    }
+    const dx = Math.abs(coin.x - (player.x + 15)), dy = Math.abs(coin.y - (player.y + player.h / 2));
+    if (!coin.taken && (dx < 28 && dy < 31 || player.magnetTime > 0 && dx < 130 && dy < 115)) { coin.taken = true; gainCoin(coin.x, coin.y); }
   }
-  for (const pickup of powerups) {
-    pickup.age++;
-    if (!pickup.taken && overlap(player, pickup)) collectPickup(pickup);
-  }
+  for (const pickup of powerups) { pickup.age++; if (!pickup.taken && overlap(player, pickup)) collectPickup(pickup); }
   const portal = portalUnderPlayer();
   if (portal && downBuffer && portalCooldown === 0) { beginWarp(portal); return; }
   updateContextHint();
-  for (const tile of zone.checkpoints || []) {
-    if (player.x > tile * T && (checkpoint.zone !== zone.id || checkpoint.x < tile * T)) {
-      checkpoint = { zone: zone.id, x: tile * T, y: GROUND - player.h };
-      showToast('存档点已点亮');
-    }
+  for (const tile of zone.checkpoints || []) if (player.x > tile * T && (checkpoint.zone !== zone.id || checkpoint.x < tile * T)) {
+    checkpoint = { zone: zone.id, x: tile * T, y: GROUND - 34 }; player.hp = player.maxHp;
+    showToast('营地点亮 · 体力已恢复，进度已保存'); sound('checkpoint'); saveProgress(); updateHud();
   }
-  if (player.y > H + 120) loseLife();
+  if (player.y > H + 100) loseLife();
   if (zone.finishX && player.x + player.w > zone.finishX + 8 && player.y < GROUND) winGame();
 }
 function updateEnemies() {
   const solidList = solids();
   for (const enemy of enemies) {
+    if (enemy.isBoss) continue;
     if (!enemy.alive) { if (enemy.squash > 0) enemy.squash--; continue; }
     if (!enemy.active) {
       if (enemy.x < camera - 50 || enemy.x > camera + W + 50) continue;
@@ -682,142 +775,134 @@ function updateEnemies() {
     if (enemy.x < enemy.home - 105) enemy.vx = Math.abs(enemy.vx);
     if (enemy.x > enemy.home + 105) enemy.vx = -Math.abs(enemy.vx);
     if (enemy.type === 'bat') {
-      enemy.x += enemy.vx;
-      enemy.y = enemy.baseY + Math.sin(tick * .07 + enemy.phase) * 28;
+      if (!enemy.stun) { enemy.x += enemy.vx; enemy.y = enemy.baseY + Math.sin(tick * .07 + enemy.phase) * 28; }
     } else {
-      if (!enemy.stun) enemy.x += enemy.vx;
+      if (!enemy.stun && enemy.type !== 'spitter') enemy.x += enemy.vx;
       for (const solid of solidList) {
-        if (!overlap(enemy, solid)) continue;
-        if (enemy.vx > 0) enemy.x = solid.x - enemy.w;
-        else enemy.x = solid.x + solid.w;
+        if (solid.oneWay || !overlap(enemy, solid)) continue;
+        enemy.x = enemy.vx > 0 ? solid.x - enemy.w : solid.x + solid.w;
         enemy.vx *= -1;
       }
       const prevBottom = enemy.y + enemy.h;
-      if (enemy.type === 'slime' && enemy.vy === 0 && (tick + Math.round(enemy.phase * 10)) % 83 === 0) enemy.vy = -8.5;
-      enemy.vy = Math.min(12, enemy.vy + .5);
-      enemy.y += enemy.vy;
-      for (const solid of solidList) {
-        if (overlap(enemy, solid) && enemy.vy > 0 && prevBottom <= solid.y + 10) {
-          enemy.y = solid.y - enemy.h;
-          enemy.vy = 0;
-        }
-      }
-      if (prevBottom <= GROUND + 10 && enemy.y + enemy.h >= GROUND && overGround(enemy)) {
-        enemy.y = GROUND - enemy.h;
-        enemy.vy = 0;
+      if (!enemy.stun && enemy.type === 'slime' && enemy.vy === 0 && (tick + Math.round(enemy.phase * 10)) % 83 === 0) enemy.vy = -8.5;
+      enemy.vy = Math.min(12, enemy.vy + .5); enemy.y += enemy.vy;
+      for (const solid of solidList) if (overlap(enemy, solid) && enemy.vy > 0 && prevBottom <= solid.y + 10) { enemy.y = solid.y - enemy.h; enemy.vy = 0; }
+      if (prevBottom <= GROUND + 10 && enemy.y + enemy.h >= GROUND && overGround(enemy)) { enemy.y = GROUND - enemy.h; enemy.vy = 0; }
+      if (enemy.type === 'spitter' && !enemy.stun && Math.abs(enemy.x - player.x) < 540 && (tick + Math.floor(enemy.phase)) % 130 === 0) {
+        const facing = Math.sign(player.x - enemy.x) || -1;
+        enemyShots.push({ x: enemy.x + enemy.w / 2, y: enemy.y + 12, w: 16, h: 12, vx: facing * 3.1, life: 170 });
+        sparkle(enemy.x + 17, enemy.y + 15, '#ecad8b', 4);
       }
     }
     if (enemy.y > H + 100) { enemy.alive = false; continue; }
     if (state !== 'playing') continue;
-    const slash = { x: player.facing > 0 ? player.x + 12 : player.x - 43, y: player.y - 10, w: 62, h: 52 };
+    const slash = { x: player.facing > 0 ? player.x + 15 : player.x - player.attackReach, y: player.y - 14, w: player.attackReach, h: player.h + 24 };
     if (player.attackFrame > 0 && enemy.lastAttackId !== player.attackId && overlap(enemy, slash)) {
-      enemy.lastAttackId = player.attackId;
-      damageEnemy(enemy, 210);
-      continue;
+      enemy.lastAttackId = player.attackId; damageEnemy(enemy, 210, player.weapon === 'claw' ? 'claw' : 'paw'); continue;
     }
     if (!overlap(player, enemy)) continue;
-    if (player.starTime > 0) {
-      if (enemy.type === 'guardian') { if (enemy.stun === 0) damageEnemy(enemy, 200); player.invulnerable = 35; }
-      else { enemy.alive = false; enemy.squash = 16; score += 200; sparkle(enemy.x + enemy.w / 2, enemy.y + enemy.h / 2, '#ffe889', 14); sound('stomp'); updateHud(); }
-      continue;
-    }
-    if (player.invulnerable) continue;
+    if (player.starTime > 0) { damageEnemy(enemy, 200, 'star'); continue; }
     if (player.vy > 1.2 && player.prevY + player.h < enemy.y + 14) {
       player.stompChain++;
       const bonus = Math.min(800, 100 * 2 ** (player.stompChain - 1));
-      damageEnemy(enemy, bonus);
-      if (player.stompChain > 1 && enemy.type !== 'guardian') showToast(`连踩 ×${player.stompChain}　+${bonus}`);
-      player.vy = control.jump ? -10.2 : -8.2;
-    } else if (enemy.stun > 0) {
-      continue;
-    } else if (player.shield) {
-      player.shield = false;
-      player.invulnerable = 95;
-      player.vy = -5;
-      showToast('护盾挡住了一次碰撞！');
-      sound('hurt');
-    } else {
-      loseLife();
-      return;
-    }
+      const slammed = player.groundPound;
+      damageEnemy(enemy, bonus, slammed ? 'slam' : 'stomp');
+      if (slammed) slamImpact();
+      player.groundPound = false; player.vy = control.jump ? -10.2 : -8.2;
+      player.airJumps = player.bootsTime > 0 ? 2 : 1; player.airDashUsed = false;
+      if (player.stompChain > 1) showToast(`连踩 ×${player.stompChain}　+${bonus}`);
+    } else if (!enemy.stun) damagePlayer(1, enemy.x + enemy.w / 2);
   }
 }
 function loseLife() {
   if (state !== 'playing') return;
-  lives--;
-  sound('hurt');
-  contextHint.classList.remove('show');
-  updateHud();
+  lives--; runDeaths++; stageDeaths++; releaseAllControls();
+  player.hp = 0; player.vx = 0; player.vy = -7; player.groundPound = false;
+  sound('hurt'); feedback(player.x + 15, player.y, '#ec8c81', 8);
+  contextHint.classList.remove('show'); updateHud();
   if (lives <= 0) {
-    state = 'gameover';
-    setOverlay('GAME OVER', '下次一定能通关！', `这次收集了 ${coinCount} 枚金币，得分 ${score}。团子狗已经准备好再试一次。`, '重新挑战');
-  } else {
-    state = 'respawn';
-    setTimeout(() => {
-      if (state !== 'respawn') return;
-      const save = { ...checkpoint };
-      resetWorld();
-      activateZone(zones[save.zone]);
-      player.x = save.x;
-      player.y = save.y;
-      player.prevY = save.y;
-      player.invulnerable = 90;
-      camera = Math.max(0, Math.min(zone.width - W, player.x - 290));
-      timeLeft = 400;
-      state = 'playing';
-      updateHud();
-      showToast(`还有 ${lives} 条生命，加油！`);
-    }, 850);
+    state = 'gameover'; saveData.run = null; persistSave(); updateTitleRecords();
+    setOverlay('THE TRAIL GOES ON', '冒险还可以再来一次', `本次收藏 ${gemCount} 枚星晶、${coinCount} 枚金币，得分 ${score}。你的最佳关卡记录已保留。`, '重新挑战');
+    return;
   }
+  state = 'respawn';
+  const equipment = { shield: player.shield, bootsTime: player.bootsTime, starTime: player.starTime,
+    magnetTime: player.magnetTime, weapon: player.weapon, weaponTime: player.weaponTime };
+  deathTimeout = setTimeout(() => {
+    if (state !== 'respawn') return;
+    const destination = zones[checkpoint.zone] || zone;
+    player = Object.assign(freshPlayer(), equipment); activateZone(destination);
+    const unfinishedBoss = destination.enemies.find(enemy => enemy.isBoss && enemy.alive);
+    if (unfinishedBoss) {
+      const suppliesAdded = unfinishedBoss.suppliesAdded;
+      resetBossBattles([destination]); unfinishedBoss.suppliesAdded = suppliesAdded;
+    }
+    player.x = checkpoint.x; player.y = checkpoint.y; player.prevY = player.y;
+    player.invulnerable = 100; player.grounded = false;
+    camera = Math.max(0, Math.min(zone.width - W, player.x - 315));
+    projectiles.length = enemyShots.length = barkWaves.length = ghostTrails.length = 0;
+    hitStop = damageFlash = 0; arrivalFade = 20; portalCooldown = 70;
+    if (timeLeft <= 0) timeLeft = 200;
+    state = 'playing'; updateHud(); saveProgress();
+    showToast(`回到营地 · 还有 ${lives} 条生命`);
+  }, 900);
 }
 function winGame() {
   if (state !== 'playing') return;
-  if (zone.bossRequired && enemies.some(enemy => enemy.type === 'guardian' && enemy.alive)) {
-    if (tick % 50 === 0) showToast('击败城堡守卫，才能打开终点！');
-    return;
+  if (zone.bossRequired && enemies.some(enemy => enemy.isBoss && enemy.alive)) {
+    if (tick % 50 === 0) showToast('击败首领，才能打开出口！'); return;
   }
-  state = 'won';
-  const bonus = Math.ceil(timeLeft) * 10;
-  score += bonus;
-  updateHud();
-  sound('win');
+  state = 'won'; releaseAllControls();
+  const bonus = Math.ceil(timeLeft) * 10; score += bonus;
+  const grade = recordCompletion();
+  if (zone !== castle) saveProgress(true);
+  updateHud(); updateTitleRecords(); sound('win');
   sparkle(zone.finishX, GROUND - 245, '#ffe582', 25);
   setTimeout(() => {
     if (state !== 'won') return;
     const finalStage = zone === castle;
-    setOverlay(`WORLD ${zone.stage} CLEAR`, finalStage ? '四关全部通关！' : `${zone.stage} 通关啦！`, `收集 ${coinCount} 枚金币 · 时间奖励 ${bonus} 分 · 总分 ${score} 分`, finalStage ? '从头再玩' : `前往 ${stageOrder[stageOrder.indexOf(zone) + 1].stage}`);
+    setOverlay(`WORLD ${zone.stage} CLEAR · ${grade} RANK`, finalStage ? '团子，成为了冒险家！' : `${zone.stage} · 冒险完成`,
+      `${grade} 级评价 · 本关 ${stageGems} 枚星晶 · ${stageHits} 次受伤 · ${stageDeaths} 次重试\n时间奖励 ${bonus} 分 · 总分 ${score} 分`,
+      finalStage ? '再来一次完整旅程' : `前往 ${stageOrder[stageOrder.indexOf(zone) + 1].stage}`);
   }, 650);
 }
 function updateEffects() {
   for (const block of zone.blocks) if (block.bump > 0) block.bump--;
-  for (const particle of particles) {
-    particle.x += particle.vx; particle.y += particle.vy;
-    particle.vy += .15; particle.life--;
-  }
+  for (const particle of particles) { particle.x += particle.vx; particle.y += particle.vy; particle.vy += .15; particle.life--; }
   for (const coin of movingCoins) coin.age++;
-  for (let i = particles.length - 1; i >= 0; i--) if (particles[i].life <= 0) particles.splice(i, 1);
+  for (const label of floatingLabels) { label.y -= .55; label.life--; }
+  for (const wave of barkWaves) wave.life--;
+  for (const trail of ghostTrails) trail.life--;
+  if (screenShake > 0) screenShake *= .86;
+  if (damageFlash > 0) damageFlash--;
+  if (stageIntro > 0) stageIntro--;
+  for (const list of [particles, floatingLabels, barkWaves, ghostTrails]) for (let i = list.length - 1; i >= 0; i--) if (list[i].life <= 0) list.splice(i, 1);
   for (let i = movingCoins.length - 1; i >= 0; i--) if (movingCoins[i].age > 33) movingCoins.splice(i, 1);
 }
 function step() {
   if (state === 'warping') {
-    tick++;
-    warp.ticks--;
-    updateEffects();
-    if (warp.ticks <= 0) finishWarp();
+    tick++; warp.ticks--; updateEffects(); if (warp.ticks <= 0) finishWarp(); return;
+  }
+  if (state === 'won' || state === 'respawn') {
+    tick++; updateEffects();
+    if (state === 'respawn') { player.vy += .4; player.y += player.vy; }
     return;
   }
-  if (state === 'won') { tick++; updateEffects(); return; }
   if (state !== 'playing') return;
-  tick++;
+  if (hitStop > 0) { hitStop--; return; }
+  tick++; timeLeft -= 1 / 60;
   if (arrivalFade > 0) arrivalFade--;
-  timeLeft -= 1 / 60;
   if (timeLeft <= 0) { timeLeft = 0; loseLife(); return; }
-  updatePlayer();
+  updateWorldFeatures();
+  if (state === 'playing') updatePlayer();
   if (state === 'playing') updateProjectiles();
   if (state === 'playing') updateEnemies();
-  updateEffects();
-  camera += (Math.max(0, Math.min(zone.width - W, player.x - 315)) - camera) * .16;
-  if (tick % 20 === 0) updateHud();
+  if (state === 'playing') updateBossBattle();
+  updateEffects(); updateMusic();
+  const arena = activeBossArena();
+  const target = arena ? arena.camera : Math.max(0, Math.min(zone.width - W, player.x - 315 + player.vx * 9));
+  camera += (target - camera) * .12;
+  if (tick % 12 === 0) updateHud();
 }
 
 function fill(x, y, w, h, color) {
@@ -1192,7 +1277,7 @@ function drawItem(type, x, y, age = 0) {
   ctx.globalAlpha = .17 + (Math.sin(tick / 17 + x) + 1) * .05;
   fill(x - 9, y - 11, 52, 48, type === 'star' || type === 'spark' ? '#ffe580' : '#ddcaff');
   ctx.globalAlpha = 1;
-  if (type === 'bone') { drawBone(x, y + 5); return; }
+  if (type === 'bone' || type === 'boomerang') { drawBone(x, y + 5); if (type === 'boomerang') { fill(x + 13, y + 6, 8, 3, '#72c8c6'); fill(x + 26, y - 5, 3, 6, '#b5f5dd'); } return; }
   if (type === 'boots') {
     fill(x + 4, y + 1, 25, 22, '#415e9c');
     fill(x + 9, y + 4, 17, 14, '#7a9cdb');
@@ -1242,6 +1327,7 @@ function drawItem(type, x, y, age = 0) {
 function drawProjectiles() {
   for (const shot of projectiles) {
     const x = Math.round(shot.x - camera), y = Math.round(shot.y);
+    if (shot.kind === 'boomerang') { ctx.save(); ctx.translate(x + 14, y + 8); ctx.rotate(shot.age * .34); drawBone(-17, -11); fill(-3, -5, 8, 3, '#82d7d4'); ctx.restore(); continue; }
     if (x < -30 || x > W + 30) continue;
     ctx.globalAlpha = .22;
     fill(x - 9, y - 8, 34, 29, '#fff0a1');
@@ -1267,6 +1353,7 @@ function drawCollectibles() {
   }
 }
 function drawEnemy(enemy) {
+  if (enemy.isBoss) return;
   const x = Math.round(enemy.x - camera), y = Math.round(enemy.y);
   if (x < -50 || x > W + 50) return;
   if (!enemy.alive) {
@@ -1277,6 +1364,14 @@ function drawEnemy(enemy) {
     ctx.globalAlpha = .2;
     fill(x + 2, GROUND - 4, enemy.w + 2, 4, '#172e3c');
     ctx.globalAlpha = 1;
+  }
+  if (enemy.stun && tick % 10 < 5) { drawPawGlyph(x + enemy.w / 2, y - 13, '#ffe7a1', .65); }
+  if (enemy.type === 'spitter') {
+    fill(x + 4, y + 25, 28, 10, '#34495a'); fill(x + 2, y + 12, 30, 20, '#588b82');
+    fill(x + 5, y + 5, 24, 19, '#8fc1a4'); fill(x + 11, y, 12, 9, '#b4d3a0');
+    fill(x + 7, y + 14, 5, 5, '#22394e'); fill(x + 22, y + 14, 5, 5, '#22394e');
+    fill(x + 12, y + 22, 13, 8, '#3a5861'); fill(x + 16, y + 23, 6, 4, '#ebba93');
+    fill(x + 6, y + 8, 7, 3, '#d8ebbd'); return;
   }
   if (enemy.type === 'guardian') {
     const blink = enemy.stun > 0 && tick % 8 < 4;
@@ -1350,9 +1445,10 @@ function drawEnemy(enemy) {
 }
 function drawDog() {
   if (!player) return;
-  if (player.invulnerable && Math.floor(tick / 5) % 2) return;
+  ctx.save();
+  if (player.invulnerable && Math.floor(tick / 5) % 2) ctx.globalAlpha = .52;
   const sink = state === 'warping' && warp ? (warp.total - warp.ticks) * 2.2 : 0;
-  const x = Math.round(player.x - camera - 17), y = Math.round(player.y - 29 + sink);
+  const x = Math.round(player.x - camera - 17), y = Math.round(player.y + player.h - 63 + sink);
   const moving = Math.abs(player.vx) > .65;
   const row = state === 'respawn' ? 5 : !player.grounded ? 4 : moving ? 1 : 0;
   const frames = row === 0 ? 6 : row === 4 ? 6 : 8;
@@ -1389,7 +1485,8 @@ function drawDog() {
   if (sprite) {
     ctx.save();
     ctx.translate(x + 32, y + 70);
-    ctx.scale((player.facing < 0 ? -1 : 1) * (1 + squash - stretch / 2), 1 - squash + stretch);
+    ctx.scale((player.facing < 0 ? -1 : 1) * (1 + squash - stretch / 2 + (player.dashTime ? .15 : 0)), (1 - squash + stretch) * (player.crouched ? .72 : 1));
+    ctx.rotate(player.groundPound ? player.facing * .12 : player.wallDir ? player.wallDir * -.12 : 0);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(sprite, col * 192, row * 208, 192, 208, -32, -70, 65, 70);
     ctx.restore();
@@ -1398,6 +1495,11 @@ function drawDog() {
     fill(x + 18, y + 30, 30, 25, '#fff4d6');
     fill(x + 22, y + 25, 4, 4, '#302f32'); fill(x + 39, y + 25, 4, 4, '#302f32');
   }
+  // A small adventurer scarf and a collar keep the same plush silhouette in every state.
+  const scarfX = player.facing > 0 ? x + 18 : x + 36;
+  fill(scarfX, y + 45, 14, 4, '#bd625b'); fill(scarfX - player.facing * 5, y + 46, 5, 11, '#e7886a');
+  if (player.weapon === 'boomerang' && player.weaponTime > 0) { fill(x + 30, y + 47, 8, 5, '#78bbb9'); drawPawGlyph(x + 34, y + 50, '#fff2c5', .28); }
+  if (player.groundPound) { fill(x + 24, y + 75, 20, 3, '#ffe8a7'); fill(x + 28, y + 82, 12, 3, '#d4f1e6'); }
   if (player.shield) {
     fill(x + 25, y + 49, 17, 4, '#d98260');
     fill(x + 31, y + 46, 7, 9, '#ffe7a1');
@@ -1430,12 +1532,13 @@ function drawDog() {
   }
   if (player.attackFrame > 0) {
     const direction = player.facing;
-    const edge = direction > 0 ? x + 65 : x - 35;
+    const edge = direction > 0 ? player.x - camera + player.attackReach - 8 : player.x - camera - player.attackReach + 10;
     const reach = player.attackFrame > 6 ? 0 : 6;
     fill(edge + direction * reach, y + 15, 5, 34, '#d8f8ef');
     fill(edge + direction * (reach + 8), y + 8, 4, 24, '#9ddde0');
     fill(edge + direction * (reach + 15), y + 18, 3, 22, '#fff6d7');
   }
+  ctx.restore();
 }
 function drawFlagAndCastle() {
   if (!zone.finishX) return;
@@ -1443,7 +1546,7 @@ function drawFlagAndCastle() {
   const night = zone === castle;
   const airy = zone === sky;
   if (x > -50 && x < W + 50) {
-    if (night && enemies.some(enemy => enemy.type === 'guardian' && enemy.alive)) {
+    if (night && enemies.some(enemy => enemy.isBoss && enemy.alive)) {
       ctx.globalAlpha = .35 + (Math.sin(tick / 12) + 1) * .1;
       fill(x - 11, GROUND - 220, 12, 220, '#a9d9e6');
       fill(x - 15, GROUND - 218, 4, 216, '#d6f9ed');
@@ -1514,27 +1617,44 @@ function drawAtmosphere() {
 function drawParticles() {
   for (const p of particles) fill(p.x - camera, p.y, p.size, p.size, p.color);
 }
+function drawActionEffects() {
+  for (const trail of ghostTrails) {
+    if (!sprite) continue;
+    ctx.save(); ctx.globalAlpha = trail.life / 12 * .22;
+    ctx.translate(trail.x - camera + 15, trail.y + 41); ctx.scale(trail.facing, 1);
+    ctx.drawImage(sprite, 192, 4 * 208, 192, 208, -32, -70, 65, 70); ctx.restore();
+  }
+  for (const wave of barkWaves) {
+    const progress = 1 - wave.life / (wave.type === 'slam' ? 22 : 26), radius = 22 + progress * (wave.type === 'slam' ? 115 : 170);
+    ctx.save(); ctx.globalAlpha = (1 - progress) * .7; ctx.strokeStyle = wave.type === 'slam' ? '#ffeab0' : '#abf4df'; ctx.lineWidth = 5 - progress * 3;
+    ctx.beginPath(); ctx.ellipse(wave.x - camera, wave.y, radius, wave.type === 'slam' ? radius * .2 : radius * .68, 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+  }
+  for (const label of floatingLabels) {
+    ctx.save(); ctx.globalAlpha = Math.min(1, label.life / 15); ctx.font = 'bold 13px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#1d3149'; ctx.fillText(label.text, label.x - camera + 1, label.y + 1); ctx.fillStyle = label.color; ctx.fillText(label.text, label.x - camera, label.y); ctx.restore();
+  }
+}
+function drawStageIntro() {
+  if (stageIntro <= 0 || state !== 'playing' || activeBossArena()) return;
+  ctx.save(); ctx.globalAlpha = Math.min(1, stageIntro / 28, (150 - stageIntro) / 18);
+  const width = 300, x = (W - width) / 2, y = 95;
+  fill(x, y, width, 62, '#20364ce6'); fill(x + 12, y + 10, 3, 42, '#e8bd75');
+  ctx.textAlign = 'center'; ctx.fillStyle = '#eebf7b'; ctx.font = '10px monospace'; ctx.fillText('A LITTLE DOG. A BIG ADVENTURE.', W / 2, y + 18);
+  ctx.fillStyle = '#fff2d0'; ctx.font = 'bold 21px system-ui, sans-serif'; ctx.fillText(zone.name, W / 2, y + 46); ctx.restore();
+}
 function draw() {
-  drawStageBackground();
-  drawGround();
-  drawFlagAndCastle();
-  drawCheckpoints();
-  drawBlocks();
-  drawPipes();
-  drawCollectibles();
-  drawProjectiles();
+  ctx.save();
+  if (screenShake > .25 && state !== 'paused') ctx.translate(Math.sin(tick * 2.3) * screenShake, Math.cos(tick * 3.1) * screenShake * .55);
+  drawStageBackground(); drawGround(); drawFlagAndCastle(); drawCheckpoints();
+  drawBlocks(); drawPipes(); drawWorldFeatures(); drawCollectibles(); drawProjectiles();
   for (const enemy of enemies) drawEnemy(enemy);
-  drawDog();
-  drawParticles();
-  drawAtmosphere();
+  drawBossBattle(); drawActionEffects(); drawDog(); drawParticles(); drawAtmosphere();
+  ctx.restore();
+  if (damageFlash > 0) { ctx.globalAlpha = damageFlash / 100; fill(0, 0, W, H, '#db6562'); ctx.globalAlpha = 1; }
+  drawStageIntro(); drawBossHud();
   if (state === 'warping' && warp) {
-    ctx.globalAlpha = .06 + (warp.total - warp.ticks) / warp.total * .88;
-    fill(0, 0, W, H, '#11142b');
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = .06 + (warp.total - warp.ticks) / warp.total * .88; fill(0, 0, W, H, '#11142b'); ctx.globalAlpha = 1;
   } else if (arrivalFade > 0) {
-    ctx.globalAlpha = arrivalFade / 20 * .9;
-    fill(0, 0, W, H, '#11142b');
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = arrivalFade / 20 * .9; fill(0, 0, W, H, '#11142b'); ctx.globalAlpha = 1;
   }
 }
 function frame(now) {
@@ -1552,6 +1672,19 @@ function ensureAudio() {
   }
   if (audio?.state === 'suspended') audio.resume();
 }
+function updateMusic() {
+  if (!musicEnabled || muted || !audio || state !== 'playing') return;
+  const fighting = !!activeBossArena();
+  const tempo = fighting ? 14 : 20;
+  if (tick % tempo) return;
+  const melodies = { surface: [0,4,7,12,7,4,2,7,4,0,7,9,7,4,2,0], cave: [0,3,7,10,7,3,5,2], orchard: [0,4,7,9,7,4,5,2], sky: [12,7,9,4,7,12,14,11], castle: [0,3,7,10,8,7,3,2] };
+  const sequence = melodies[zone.id] || melodies.surface;
+  const beat = Math.floor(tick / tempo);
+  const root = zone === castle || zone === cave ? 196 : 220;
+  const note = fighting ? [0,7,3,10,0,7,2,8][beat % 8] : sequence[beat % sequence.length];
+  tone(root * 2 ** (note / 12), .16, 'triangle', .014);
+  if (beat % 4 === 0) tone(root / 2, .24, 'sine', .023);
+}
 function tone(frequency, duration, type = 'square', volume = .055, delay = 0) {
   if (!audio || muted) return;
   const start = audio.currentTime + delay;
@@ -1567,6 +1700,11 @@ function tone(frequency, duration, type = 'square', volume = .055, delay = 0) {
 }
 function sound(name) {
   if (muted) return;
+  if (name === 'dash') { tone(640, .09, 'sawtooth', .025); tone(190, .12, 'triangle', .05, .04); }
+  if (name === 'bark') { tone(240, .08, 'triangle', .09); tone(360, .12, 'triangle', .08, .09); tone(720, .15, 'sine', .025, .16); }
+  if (name === 'slam') { tone(100, .22, 'triangle', .09); tone(70, .14, 'sawtooth', .03, .03); }
+  if (name === 'gem') [660, 880, 1100].forEach((f, i) => tone(f, .2, 'sine', .045, i * .09));
+  if (name === 'checkpoint') [390, 490, 590, 780].forEach((f, i) => tone(f, .2, 'triangle', .035, i * .08));
   if (name === 'jump') { tone(340, .09); tone(485, .12, 'square', .045, .07); }
   if (name === 'doubleJump') { tone(530, .08); tone(790, .15, 'square', .045, .07); }
   if (name === 'coin') { tone(710, .07); tone(920, .12, 'square', .05, .08); }
@@ -1582,22 +1720,27 @@ function sound(name) {
   if (name === 'win') [440, 550, 660, 880, 660, 880].forEach((f, i) => tone(f, .19, 'square', .045, i * .14));
 }
 
-function setControl(name, pressed) {
-  if (name === 'jump' && pressed && !control.jump) jumpBuffer = 8;
-  if (name === 'attack' && pressed && !control.attack) attackBuffer = 8;
-  if (name === 'down' && pressed && !control.down) downBuffer = 12;
-  if (name === 'jump' && !pressed && control.jump && player && player.vy < -4) player.vy *= .55;
-  if (pressed && !control[name] && state === 'playing' && player && (name === 'left' || name === 'right')) {
-    const direction = name === 'right' ? 1 : -1;
-    player.vx = Math.max(-3.7, Math.min(3.7, player.vx + direction * .8));
-    player.x = Math.max(0, Math.min(zone.width - player.w, player.x + direction * 1.5));
+function setControl(name, pressed, source = 'direct') {
+  if (!(name in control)) return;
+  if (pressed && state !== 'playing') return;
+  if (!heldInputs.has(name)) heldInputs.set(name, new Set());
+  const held = heldInputs.get(name);
+  if (pressed) held.add(source); else held.delete(source);
+  const next = held.size > 0;
+  if (next && !control[name]) {
+    if (name === 'jump') jumpBuffer = 8;
+    if (name === 'attack') attackBuffer = 8;
+    if (name === 'down') downBuffer = 12;
+    if (name === 'dash') dashBuffer = 8;
+    if (name === 'bark') barkBuffer = 8;
   }
-  control[name] = pressed;
+  if (name === 'jump' && !next && control.jump && player && player.vy < -4 && !player.dashTime) player.vy *= .55;
+  control[name] = next;
 }
 const keyMap = {
-  ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
-  ArrowDown: 'down', KeyS: 'down',
-  ArrowUp: 'jump', KeyW: 'jump', Space: 'jump', ShiftLeft: 'run', ShiftRight: 'run', KeyX: 'run', KeyJ: 'attack', KeyZ: 'attack',
+  ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', ArrowDown: 'down', KeyS: 'down',
+  ArrowUp: 'jump', KeyW: 'jump', Space: 'jump', ShiftLeft: 'run', ShiftRight: 'run', KeyX: 'run',
+  KeyJ: 'attack', KeyZ: 'attack', KeyK: 'dash', KeyC: 'dash', KeyL: 'bark', KeyV: 'bark',
 };
 function primaryAction() {
   if (state === 'paused') { pauseGame(); return; }
@@ -1605,55 +1748,94 @@ function primaryAction() {
   if (state === 'won' && zone === castle) selectedStage = 'surface';
   if (state === 'title' || state === 'won' || state === 'gameover') startGame();
 }
+function restartStage() {
+  if (state === 'title') return;
+  startGame(true, zone === cave ? 'surface' : zone.id);
+  showToast('全新挑战开始 · 本关的最佳记录已保留');
+}
+function returnToTitle() {
+  if (state === 'playing' || state === 'paused') saveProgress();
+  releaseAllControls(); state = 'title'; resetWorld();
+  if (!stageOrder.some(level => level.id === selectedStage)) selectedStage = 'surface';
+  for (const button of document.querySelectorAll('[data-stage]')) button.classList.toggle('selected', button.dataset.stage === selectedStage);
+  score = coinCount = gemCount = stageGems = 0; lives = 3; timeLeft = 400;
+  setOverlay('A LITTLE DOG. A BIG ADVENTURE.', '小爪子，大冒险。', '跨越草原、果园与云海，闯进绒绒城堡。\n秘密宝藏和强大的首领，正等着团子！', '开始冒险');
+  document.querySelector('#menu-button').classList.add('hidden');
+  levelPicker.classList.remove('hidden');
+  pauseButton.textContent = 'Ⅱ'; pauseButton.setAttribute('aria-label', '暂停游戏');
+  updateHud(); updateTitleRecords();
+}
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen?.();
+  else document.querySelector('.app')?.requestFullscreen?.().catch(() => showToast('当前浏览器暂不支持全屏'));
+}
+const helpDialog = document.querySelector('#help-dialog');
+let helpWasPlaying = false;
+function openHelp() {
+  helpWasPlaying = state === 'playing';
+  if (helpWasPlaying) pauseGame();
+  if (helpDialog.showModal) helpDialog.showModal();
+}
+function closeHelp() { helpDialog.close?.(); }
+helpDialog.addEventListener('close', () => { if (helpWasPlaying && state === 'paused') pauseGame(); helpWasPlaying = false; });
 document.addEventListener('keydown', event => {
-  if (keyMap[event.code] || ['Escape', 'KeyP', 'KeyM', 'Enter'].includes(event.code)) event.preventDefault();
+  if (helpDialog.open) return;
+  if (keyMap[event.code] || ['Escape','KeyP','KeyM','KeyR','KeyF','Enter'].includes(event.code)) event.preventDefault();
   if (event.code === 'Escape' || event.code === 'KeyP') { if (!event.repeat) pauseGame(); return; }
   if (event.code === 'KeyM') { if (!event.repeat) toggleSound(); return; }
-  if ((event.code === 'Enter' || event.code === 'Space') && state !== 'playing' && !event.repeat) {
-    primaryAction();
-    return;
-  }
-  if (keyMap[event.code]) setControl(keyMap[event.code], true);
+  if (event.code === 'KeyR') { if (!event.repeat) restartStage(); return; }
+  if (event.code === 'KeyF') { if (!event.repeat) toggleFullscreen(); return; }
+  if ((event.code === 'Enter' || event.code === 'Space') && ['title','paused','won','gameover'].includes(state) && !event.repeat) { primaryAction(); return; }
+  if (keyMap[event.code]) setControl(keyMap[event.code], true, event.code);
 });
-document.addEventListener('keyup', event => { if (keyMap[event.code]) setControl(keyMap[event.code], false); });
-window.addEventListener('blur', () => { Object.keys(control).forEach(key => setControl(key, false)); if (state === 'playing') pauseGame(); });
+document.addEventListener('keyup', event => { if (keyMap[event.code]) setControl(keyMap[event.code], false, event.code); });
+function suspendGame() { releaseAllControls(); if (state === 'playing') pauseGame(); }
+window.addEventListener('blur', suspendGame);
+document.addEventListener('visibilitychange', () => { if (document.hidden) suspendGame(); });
+window.addEventListener('pagehide', () => { if (state === 'playing' || state === 'paused') saveProgress(); });
 for (const button of document.querySelectorAll('[data-control]')) {
   const name = button.dataset.control;
-  button.addEventListener('pointerdown', event => { event.preventDefault(); button.setPointerCapture(event.pointerId); button.classList.add('pressed'); setControl(name, true); });
-  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) button.addEventListener(type, () => { button.classList.remove('pressed'); setControl(name, false); });
-  button.addEventListener('click', () => {
-    if (state !== 'playing') return;
-    if (name === 'jump') jumpBuffer = 8;
-    else if (name === 'down') downBuffer = 12;
-    else if (name === 'attack') attackBuffer = 8;
-    else if (name === 'left' || name === 'right') {
-      const direction = name === 'right' ? 1 : -1;
-      player.vx = Math.max(-3.7, Math.min(3.7, player.vx + direction * .8));
-      player.x = Math.max(0, Math.min(zone.width - player.w, player.x + direction * 1.5));
-    }
+  button.addEventListener('pointerdown', event => {
+    event.preventDefault(); button.setPointerCapture(event.pointerId); button.classList.add('pressed');
+    setControl(name, true, `pointer${event.pointerId}`);
   });
+  for (const type of ['pointerup','pointercancel','lostpointercapture']) button.addEventListener(type, event => {
+    button.classList.remove('pressed'); setControl(name, false, `pointer${event.pointerId}`);
+  });
+  button.addEventListener('contextmenu', event => event.preventDefault());
+  button.addEventListener('click', event => {
+    if (event.detail !== 0 || state !== 'playing') return;
+    setControl(name, true, 'accessible'); setTimeout(() => setControl(name, false, 'accessible'), 100);
+  });
+}
+function syncAudioButtons() {
+  soundButton.textContent = muted ? '♪̸' : '♫'; soundButton.setAttribute('aria-label', muted ? '开启音频' : '关闭音频');
+  soundButton.setAttribute('aria-pressed', String(!muted));
+  const musicButton = document.querySelector('#music-button');
+  musicButton.textContent = musicEnabled ? '♪' : '♪̸'; musicButton.setAttribute('aria-label', musicEnabled ? '关闭背景音乐' : '开启背景音乐');
+  musicButton.setAttribute('aria-pressed', String(musicEnabled));
 }
 function toggleSound() {
-  muted = !muted;
-  if (!muted) ensureAudio();
-  soundButton.textContent = muted ? '♪̸' : '♫';
-  soundButton.setAttribute('aria-label', muted ? '开启音效' : '关闭音效');
-  showToast(muted ? '音效已关闭' : '音效已开启');
+  muted = !muted; if (!muted) ensureAudio(); syncAudioButtons(); saveSettings(); showToast(muted ? '音频已关闭' : '音频已开启');
 }
 soundButton.addEventListener('click', toggleSound);
+document.querySelector('#music-button').addEventListener('click', () => { musicEnabled = !musicEnabled; ensureAudio(); syncAudioButtons(); saveSettings(); showToast(musicEnabled ? '背景音乐已开启' : '背景音乐已关闭'); });
 pauseButton.addEventListener('click', pauseGame);
 primaryButton.addEventListener('click', primaryAction);
-for (const button of document.querySelectorAll('[data-stage]')) {
-  button.addEventListener('click', () => {
-    if (state !== 'title') return;
-    selectedStage = button.dataset.stage;
-    for (const option of document.querySelectorAll('[data-stage]')) {
-      if (option === button) option.classList.add('selected'); else option.classList.remove('selected');
-    }
-    const selected = zones[selectedStage];
-    document.querySelector('#overlay-text').textContent = `${selected.stage} · ${selected.name.split(' ')[0]}，出发吧！`;
-  });
-}
+document.querySelector('#continue-button').addEventListener('click', continueGame);
+document.querySelector('#menu-button').addEventListener('click', returnToTitle);
+document.querySelector('#restart-button').addEventListener('click', restartStage);
+document.querySelector('#fullscreen-button').addEventListener('click', toggleFullscreen);
+document.querySelector('#help-button').addEventListener('click', openHelp);
+document.querySelector('#close-help-button').addEventListener('click', closeHelp);
+for (const button of document.querySelectorAll('[data-stage]')) button.addEventListener('click', () => {
+  if (state !== 'title') return;
+  selectedStage = button.dataset.stage;
+  for (const option of document.querySelectorAll('[data-stage]')) option.classList.toggle('selected', option === button);
+  const selected = zones[selectedStage];
+  document.querySelector('#overlay-text').textContent = `${selected.stage} · ${selected.name.split(' ')[0]}，出发吧！`;
+});
+syncAudioButtons();
 
 const source = new Image();
 source.src = 'assets/plush-dog.webp';
@@ -1669,6 +1851,8 @@ source.onload = () => {
   }
   imageContext.putImageData(pixels, 0, 0);
   sprite = image;
+  const portrait = document.querySelector('#dog-portrait');
+  if (portrait) { const portraitContext = portrait.getContext('2d'); portraitContext.imageSmoothingEnabled = false; portraitContext.clearRect(0, 0, 100, 100); portraitContext.drawImage(sprite, 0, 0, 192, 208, 4, 0, 92, 100); }
 };
 for (const [name, path] of Object.entries({
   surface: 'assets/meadow-background-v1.png',
@@ -1682,4 +1866,5 @@ for (const [name, path] of Object.entries({
   image.src = path;
 }
 resetWorld();
+updateTitleRecords();
 requestAnimationFrame(frame);
