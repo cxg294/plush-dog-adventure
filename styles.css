@@ -125,6 +125,12 @@ kbd { display: inline-block; min-width: 20px; padding: 2px 5px; border: 1px soli
   .toast { top: 79px; padding: 6px 11px; font-size: 10px; }.context-hint { bottom: 45px; font-size: 10px; padding: 5px 10px; }
   .journey-strip { margin: 14px 5px 0; gap: 12px; }.objective-copy { font-size: 10px; gap: 5px; }.journey-label { display: none; }.progress-track { max-width: 150px; }
   .footer { margin-top: 22px; font-size: 9px; }.footer > span:last-child { display: none; }.quick-controls { gap: 8px 12px; margin-top: 20px; }
+  .menu-card { width: min(360px, 96%); padding: 12px 20px 14px; border-radius: 19px; }
+  .menu-kicker { font-size: 7px; }.dog-portrait { width: 60px; height: 60px; margin: 3px auto 1px; }
+  .menu-card h2 { font-size: 20px; margin: 3px 0 6px; }.menu-card p { min-height: 0; font-size: 9px; line-height: 1.5; margin-bottom: 10px; }
+  .primary-button { min-width: 165px; padding: 7px 14px; font-size: 12px; }.primary-button span { font-size: 16px; }.menu-actions { gap: 7px; }
+  .level-picker { margin-top: 10px; padding-top: 8px; }.level-chip { min-width: 34px; padding: 4px 6px; font-size: 9px; }.menu-tip { margin-top: 9px; font-size: 8px; }
+  .menu-card::before { left: 48px; top: 37px; font-size: 19px; }.menu-card::after { right: 48px; top: 51px; font-size: 13px; }
 }
 @media (max-width: 600px) {
   .app { width: calc(100% - 16px); padding-top: 12px; }.topbar { flex-wrap: wrap; gap: 10px; margin: 0 3px 13px; }
@@ -137,6 +143,7 @@ kbd { display: inline-block; min-width: 20px; padding: 2px 5px; border: 1px soli
   .overlay { padding: 8px; backdrop-filter: blur(2px); }.menu-card { width: min(270px, 96%); padding: 8px 13px 9px; border-radius: 14px; box-shadow: 0 3px 0 #b8a880, 0 12px 22px #10203955; }
   .menu-card::before { left: 40px; top: 30px; font-size: 17px; }.menu-card::after { right: 40px; top: 42px; font-size: 11px; }.menu-kicker { font-size: 6px; letter-spacing: .06em; }
   .dog-portrait { width: 48px; height: 48px; margin: 1px auto -2px; }.menu-card h2 { font-size: 17px; margin: 1px 0 3px; }.menu-card p { min-height: 0; max-width: 245px; margin: 0 auto 7px; font-size: 8px; line-height: 1.45; }
+  .overlay[data-screen="title"] .menu-card p { display: none; }
   .menu-actions { gap: 6px; }.primary-button { min-width: 153px; padding: 5px 12px; gap: 25px; border-radius: 8px; font-size: 11px; box-shadow: 0 3px 0 #253746; }.primary-button span { font-size: 16px; }
   .secondary-button { font-size: 8px; padding: 0 5px; text-underline-offset: 3px; }.level-picker { gap: 4px; margin-top: 8px; padding-top: 7px; }.level-picker > span { display: none; }.level-chip { min-width: 34px; padding: 3px 5px; font-size: 8px; border-radius: 5px; }.level-chip span { font-size: 8px; }.menu-tip { margin-top: 6px; font-size: 7px; gap: 6px; }
   .toast { top: 61px; min-width: 90px; padding: 4px 8px; font-size: 8px; }.context-hint { bottom: 29px; padding: 4px 7px; font-size: 8px; }

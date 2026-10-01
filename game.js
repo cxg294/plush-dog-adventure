@@ -342,6 +342,7 @@ function advanceStage() {
   sound('start'); saveProgress();
 }
 function setOverlay(kicker, title, message, button) {
+  overlay.dataset.screen = state;
   document.querySelector('#overlay-kicker').textContent = kicker;
   document.querySelector('#overlay-title').textContent = title;
   document.querySelector('#overlay-text').textContent = message;
